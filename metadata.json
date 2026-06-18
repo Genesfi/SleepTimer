@@ -1,0 +1,6 @@
+{
+  "name": "Sleep Timer",
+  "description": "Beneran mematikan semua media player, video, dan streaming musik saat Anda tertidur, dilengkapi tracker statistik dan mode hemat daya.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
