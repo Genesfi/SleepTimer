@@ -50,6 +50,9 @@ class SleepViewModel(application: Application) : AndroidViewModel(application) {
     @Suppress("StateFlowValueCalledInComposition")
     val isUsagePermissionGranted: StateFlow<Boolean> = _isUsagePermissionGranted.asStateFlow()
 
+    private val _isNotificationListenerGranted = MutableStateFlow(false)
+    val isNotificationListenerGranted: StateFlow<Boolean> = _isNotificationListenerGranted.asStateFlow()
+
     private val _weeklyUsageStatsFlow = MutableStateFlow<List<AppUsageDetail>>(emptyList())
     val weeklyUsageStatsFlow: StateFlow<List<AppUsageDetail>> = _weeklyUsageStatsFlow.asStateFlow()
 
@@ -130,6 +133,13 @@ class SleepViewModel(application: Application) : AndroidViewModel(application) {
 
     fun checkPermissions() {
         _isUsagePermissionGranted.value = UsageStatsHelper.isUsagePermissionGranted(context)
+        _isNotificationListenerGranted.value = isNotificationListenerEnabled()
+    }
+
+    private fun isNotificationListenerEnabled(): Boolean {
+        val pkgName = context.packageName
+        val flat = android.provider.Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
+        return flat?.contains(pkgName) == true
     }
 
     fun refreshStats() {

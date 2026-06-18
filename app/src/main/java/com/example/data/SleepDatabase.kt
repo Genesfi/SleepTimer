@@ -17,7 +17,9 @@ data class SleepSession(
     val durationMinutes: Int,
     val endedSuccessfully: Boolean,
     val internetOffAttempted: Boolean,
-    val appsKilledCount: Int
+    val appsKilledCount: Int,
+    val lastMediaTitle: String? = null,
+    val lastMediaArtist: String? = null
 )
 
 @Entity(tableName = "sleep_app_usage")
@@ -53,7 +55,7 @@ interface SleepDao {
     suspend fun clearAllAppUsage()
 }
 
-@Database(entities = [SleepSession::class, SleepAppUsage::class], version = 1, exportSchema = false)
+@Database(entities = [SleepSession::class, SleepAppUsage::class], version = 2, exportSchema = false)
 abstract class SleepDatabase : RoomDatabase() {
     abstract fun sleepDao(): SleepDao
 }

@@ -43,6 +43,16 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Sleep Timer to automatically pause multimedia playback, free up system RAM, and disconnect active radios to conserve battery power when users are sleeping." />
         </service>
+
+        <service
+            android:name=".service.MediaNotificationListener"
+            android:label="Sleep Timer Media Tracker"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

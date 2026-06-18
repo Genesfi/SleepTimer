@@ -247,6 +247,9 @@ class SleepTimerService : Service() {
     private suspend fun executeSleepActions() {
         _serviceState.value = TimerState.FINISHED
         val stopTimeMs = System.currentTimeMillis()
+        
+        // Capture what was playing right before we stop everything
+        val (mediaTitle, mediaArtist) = MediaNotificationListener.getLatestMediaInfo()
 
         // 1. Audio Fade-out before hard pause
         fadeOutAudio()
@@ -312,7 +315,9 @@ class SleepTimerService : Service() {
                     durationMinutes = durationMinutes,
                     endedSuccessfully = true,
                     internetOffAttempted = false,
-                    appsKilledCount = killedCount
+                    appsKilledCount = killedCount,
+                    lastMediaTitle = mediaTitle,
+                    lastMediaArtist = mediaArtist
                 )
             ).toInt()
 

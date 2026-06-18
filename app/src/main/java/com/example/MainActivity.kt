@@ -25,6 +25,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -101,9 +103,23 @@ fun SleepTimerApp(modifier: Modifier = Modifier) {
     val remainingSeconds by viewModel.remainingSeconds.collectAsState()
     val totalDurationSeconds by viewModel.totalDurationSeconds.collectAsState()
     val isUsageGranted by viewModel.isUsagePermissionGranted.collectAsState()
+    val isNotificationListenerGranted by viewModel.isNotificationListenerGranted.collectAsState()
 
     // Selected tab state (0: Timer, 1: Statistik)
     var selectedTab by remember { mutableStateOf(0) }
+    val pagerState = rememberPagerState(pageCount = { 2 })
+
+    // Sync selectedTab -> Pager
+    LaunchedEffect(selectedTab) {
+        if (pagerState.currentPage != selectedTab) {
+            pagerState.animateScrollToPage(selectedTab)
+        }
+    }
+
+    // Sync Pager -> selectedTab
+    LaunchedEffect(pagerState.currentPage) {
+        selectedTab = pagerState.currentPage
+    }
 
     // Request Notification permission (Android 13+)
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -149,17 +165,20 @@ fun SleepTimerApp(modifier: Modifier = Modifier) {
         )
 
         // Tab Content
-        Box(
+        HorizontalPager(
+            state = pagerState,
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth()
-        ) {
-            if (selectedTab == 0) {
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.Top
+        ) { page ->
+            if (page == 0) {
                 TimerTabContent(
                     viewModel = viewModel,
                     timerState = timerState,
                     remainingSeconds = remainingSeconds,
                     totalSeconds = totalDurationSeconds,
+                    isNotificationListenerGranted = isNotificationListenerGranted,
                     context = context
                 )
             } else {
@@ -332,6 +351,7 @@ fun TimerTabContent(
     timerState: TimerState,
     remainingSeconds: Int,
     totalSeconds: Int,
+    isNotificationListenerGranted: Boolean,
     context: Context
 ) {
     Box(
@@ -346,6 +366,19 @@ fun TimerTabContent(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     contentPadding = PaddingValues(bottom = 90.dp, top = 8.dp)
                 ) {
+                    if (!isNotificationListenerGranted) {
+                        item {
+                            PermissionBanner(
+                                title = "Akses Notifikasi Diperlukan",
+                                description = "Izinkan aplikasi untuk mencatat judul lagu/video yang diputar saat tidur.",
+                                buttonText = "AKTIFKAN AKSES MEDIA",
+                                onAction = {
+                                    context.startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
+                                }
+                            )
+                        }
+                    }
+
                     item {
                         DurationSetupCard(viewModel = viewModel)
                     }
@@ -921,6 +954,7 @@ fun StatisticsTabContent(
     val sessionLogs by viewModel.historySessions.collectAsState()
     val selectedSessionId by viewModel.selectedSessionIdForDetail.collectAsState()
     val activeDetails by viewModel.activeSessionDetailList.collectAsState()
+    val isNotificationListenerGranted by viewModel.isNotificationListenerGranted.collectAsState()
 
     LazyColumn(
         modifier = Modifier
@@ -933,6 +967,19 @@ fun StatisticsTabContent(
         if (!isUsageGranted) {
             item {
                 PermissionRequestBanner(context = context)
+            }
+        }
+        
+        if (!isNotificationListenerGranted) {
+            item {
+                PermissionBanner(
+                    title = "Akses Notifikasi Diperlukan",
+                    description = "Izinkan aplikasi untuk mencatat judul lagu/video yang diputar saat tidur agar histori lebih detail.",
+                    buttonText = "AKTIFKAN AKSES MEDIA",
+                    onAction = {
+                        context.startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))
+                    }
+                )
             }
         }
 
@@ -991,7 +1038,12 @@ fun StatisticsTabContent(
 }
 
 @Composable
-fun PermissionRequestBanner(context: Context) {
+fun PermissionBanner(
+    title: String,
+    description: String,
+    buttonText: String,
+    onAction: () -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
@@ -1007,7 +1059,7 @@ fun PermissionRequestBanner(context: Context) {
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Izin Akses Diperlukan",
+                    text = title,
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp,
                     color = Color.White
@@ -1015,31 +1067,40 @@ fun PermissionRequestBanner(context: Context) {
             }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Izin 'Usage Access' diperlukan agar aplikasi dapat melacak statistik penggunaan hp mingguan Anda dan mendeteksi aktivitas pemutaran media saat tertidur.",
+                text = description,
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(12.dp))
             Button(
-                onClick = {
-                    try {
-                        val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
-                            data = Uri.fromParts("package", context.packageName, null)
-                        }
-                        context.startActivity(intent)
-                    } catch (e: Exception) {
-                        // Fallback generic intent if Uri part fails on some OS
-                        val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
-                        context.startActivity(intent)
-                    }
-                },
-                modifier = Modifier.fillMaxWidth().testTag("button_grant_usage"),
+                onClick = onAction,
+                modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
-                Text("AKTIFKAN IZIN STATISTIK", color = MidnightBackground, fontWeight = FontWeight.Bold)
+                Text(buttonText, color = MidnightBackground, fontWeight = FontWeight.Bold)
             }
         }
     }
+}
+
+@Composable
+fun PermissionRequestBanner(context: Context) {
+    PermissionBanner(
+        title = "Izin Akses Diperlukan",
+        description = "Izin 'Usage Access' diperlukan agar aplikasi dapat melacak statistik penggunaan hp mingguan Anda dan mendeteksi aktivitas pemutaran media saat tertidur.",
+        buttonText = "AKTIFKAN IZIN STATISTIK",
+        onAction = {
+            try {
+                val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+                    data = Uri.fromParts("package", context.packageName, null)
+                }
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+                context.startActivity(intent)
+            }
+        }
+    )
 }
 
 @Composable
@@ -1218,7 +1279,7 @@ fun SleepLogItemCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = dateText,
                         fontSize = 13.sp,
@@ -1230,6 +1291,26 @@ fun SleepLogItemCard(
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    
+                    if (log.lastMediaTitle != null) {
+                        Column(modifier = Modifier.padding(top = 8.dp)) {
+                            Text(
+                                text = "TERAKHIR DIPUTAR:",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+                                letterSpacing = 0.5.sp
+                            )
+                            Text(
+                                text = "${log.lastMediaTitle}${if (log.lastMediaArtist != null) " • ${log.lastMediaArtist}" else ""}",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = CozyAmber,
+                                lineHeight = 18.sp,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        }
+                    }
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
