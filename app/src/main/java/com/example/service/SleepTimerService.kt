@@ -96,7 +96,7 @@ class SleepTimerService : Service() {
         } else if (action == ACTION_RESET) {
             _serviceState.value = TimerState.IDLE
         }
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     private fun startTimer(
@@ -115,6 +115,7 @@ class SleepTimerService : Service() {
         _serviceState.value = TimerState.RUNNING
 
         acquireWakeLock()
+        MediaNotificationListener.startNewTrackingSession()
         startForeground(NOTIFICATION_ID, buildNotification(seconds))
 
         timerJob?.cancel()
@@ -219,6 +220,9 @@ class SleepTimerService : Service() {
             .setContentIntent(pendingIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "BATALKAN", stopPendingIntent)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setWhen(if (startTimeMs > 0) startTimeMs else System.currentTimeMillis())
+            .setShowWhen(false)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -248,8 +252,9 @@ class SleepTimerService : Service() {
         _serviceState.value = TimerState.FINISHED
         val stopTimeMs = System.currentTimeMillis()
         
-        // Capture what was playing right before we stop everything
-        val (mediaTitle, mediaArtist) = MediaNotificationListener.getLatestMediaInfo()
+        // Capture ALL tracks that were playing during the session
+        val mediaPlaybacks = MediaNotificationListener.getCapturedMediaList()
+        val latestMedia = MediaNotificationListener.getLatestMediaInfo()
 
         // 1. Audio Fade-out before hard pause
         fadeOutAudio()
@@ -316,10 +321,22 @@ class SleepTimerService : Service() {
                     endedSuccessfully = true,
                     internetOffAttempted = false,
                     appsKilledCount = killedCount,
-                    lastMediaTitle = mediaTitle,
-                    lastMediaArtist = mediaArtist
+                    lastMediaTitle = latestMedia.first,
+                    lastMediaArtist = latestMedia.second
                 )
             ).toInt()
+
+            // Store the full playback list
+            if (mediaPlaybacks.isNotEmpty()) {
+                repository.insertMediaPlaybacks(mediaPlaybacks.map { 
+                    com.example.data.SleepMediaPlayback(
+                        sessionId = sleepSessionId,
+                        title = it.title,
+                        artist = it.artist,
+                        timestamp = it.timestamp
+                    )
+                })
+            }
 
             val usageStats = UsageStatsHelper.getSleepIntervalUsage(
                 context = applicationContext,

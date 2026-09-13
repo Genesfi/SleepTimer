@@ -21,6 +21,14 @@ class SleepRepository private constructor(context: Context) {
         return dao.getAllSessions()
     }
 
+    suspend fun getSessionsPaged(limit: Int, offset: Int): List<SleepSession> {
+        return dao.getSessionsPaged(limit, offset)
+    }
+
+    suspend fun getTotalSessionCount(): Int {
+        return dao.getTotalSessionCount()
+    }
+
     suspend fun insertSession(session: SleepSession): Long {
         return dao.insertSession(session)
     }
@@ -29,13 +37,28 @@ class SleepRepository private constructor(context: Context) {
         return dao.getAppUsageForSession(sessionId)
     }
 
+    suspend fun getMediaPlaybackForSession(sessionId: Int): List<SleepMediaPlayback> {
+        return dao.getMediaPlaybackForSession(sessionId)
+    }
+
     suspend fun insertAppUsages(usages: List<SleepAppUsage>) {
         dao.insertAppUsages(usages)
+    }
+
+    suspend fun insertMediaPlaybacks(playbacks: List<SleepMediaPlayback>) {
+        dao.insertMediaPlaybacks(playbacks)
     }
 
     suspend fun clearHistory() {
         dao.clearAllData()
         dao.clearAllAppUsage()
+        dao.clearAllMediaPlayback()
+    }
+
+    suspend fun deleteSession(sessionId: Int) {
+        dao.deleteSessionById(sessionId)
+        dao.deleteAppUsageBySessionId(sessionId)
+        dao.deleteMediaPlaybackBySessionId(sessionId)
     }
 
     companion object {

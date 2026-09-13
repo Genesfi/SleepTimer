@@ -10,7 +10,8 @@ A premium, high-comfort Sleep Timer application designed for Android. This app h
 -   **Zen Dark Theme**: A high-comfort "Midnight Twilight" UI palette designed to reduce eye strain in dark environments.
 -   **Haptic Feedback**: Tactile "click" sensations when adjusting the timer for a premium feel.
 -   **Lockscreen Integration**: High-priority notifications with real-time countdown visibility even when the device is locked (optimized for Xiaomi/POCO devices).
--   **Usage Analytics**: Track your app usage history and see which apps were active before your sleep sessions.
+-   **Usage Analytics**: Track your app usage history and see which media apps were active.
+-   **Detailed Playback History**: Capture and view a chronological list of all songs and videos played during each session.
 
 ## 🛠 Technical Stack
 

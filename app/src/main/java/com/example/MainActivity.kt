@@ -31,6 +31,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -71,6 +73,10 @@ import java.util.*
 import kotlin.math.cos
 import kotlin.math.sin
 
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -97,6 +103,7 @@ class MainActivity : ComponentActivity() {
 fun SleepTimerApp(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val viewModel: SleepViewModel = viewModel()
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     // Observe stats and statuses
     val timerState by viewModel.timerState.collectAsState()
@@ -104,10 +111,25 @@ fun SleepTimerApp(modifier: Modifier = Modifier) {
     val totalDurationSeconds by viewModel.totalDurationSeconds.collectAsState()
     val isUsageGranted by viewModel.isUsagePermissionGranted.collectAsState()
     val isNotificationListenerGranted by viewModel.isNotificationListenerGranted.collectAsState()
+    val reminderEnabled by viewModel.bedtimeReminderEnabled.collectAsState()
 
     // Selected tab state (0: Timer, 1: Statistik)
     var selectedTab by remember { mutableStateOf(0) }
     val pagerState = rememberPagerState(pageCount = { 2 })
+
+    // Auto-refresh permissions & stats when returning from Settings (ON_RESUME)
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.checkPermissions()
+                viewModel.refreshStats()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     // Sync selectedTab -> Pager
     LaunchedEffect(selectedTab) {
@@ -179,6 +201,7 @@ fun SleepTimerApp(modifier: Modifier = Modifier) {
                     remainingSeconds = remainingSeconds,
                     totalSeconds = totalDurationSeconds,
                     isNotificationListenerGranted = isNotificationListenerGranted,
+                    reminderEnabled = reminderEnabled,
                     context = context
                 )
             } else {
@@ -352,6 +375,7 @@ fun TimerTabContent(
     remainingSeconds: Int,
     totalSeconds: Int,
     isNotificationListenerGranted: Boolean,
+    reminderEnabled: Boolean,
     context: Context
 ) {
     Box(
@@ -384,7 +408,7 @@ fun TimerTabContent(
                     }
 
                     item {
-                        SystemTogglesCard(viewModel = viewModel, context = context)
+                        SystemTogglesCard(viewModel = viewModel, context = context, reminderEnabled = reminderEnabled)
                     }
 
                     item {
@@ -526,7 +550,7 @@ fun DurationSetupCard(viewModel: SleepViewModel) {
 }
 
 @Composable
-fun SystemTogglesCard(viewModel: SleepViewModel, context: Context) {
+fun SystemTogglesCard(viewModel: SleepViewModel, context: Context, reminderEnabled: Boolean) {
     val killSwitchEnabled by viewModel.killSwitchEnabled.collectAsState()
 
     Card(
@@ -577,6 +601,47 @@ fun SystemTogglesCard(viewModel: SleepViewModel, context: Context) {
                     )
                 )
             }
+
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 12.dp),
+                thickness = 0.5.dp,
+                color = Color.White.copy(alpha = 0.1f)
+            )
+
+            // Toggle 2: Smart Bedtime Reminder
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Notifications,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Pengingat Tidur Pintar",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = "Ingatkan pasang timer jika audio aktif di malam hari (21:00 - 02:00).",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = reminderEnabled,
+                    onCheckedChange = { viewModel.toggleBedtimeReminder(it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = MaterialTheme.colorScheme.primary,
+                        checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                    )
+                )
+            }
         }
     }
 }
@@ -586,6 +651,15 @@ fun AppKillSelectorCard(viewModel: SleepViewModel) {
     val lists by viewModel.userInstalledApps.collectAsState()
     val selections by viewModel.selectedAppsToKill.collectAsState()
     val killSwitchEnabled by viewModel.killSwitchEnabled.collectAsState()
+
+    var searchQuery by remember { mutableStateOf("") }
+    val filteredApps = remember(lists, searchQuery) {
+        if (searchQuery.isBlank()) lists
+        else lists.filter {
+            it.appName.contains(searchQuery, ignoreCase = true) ||
+            it.packageName.contains(searchQuery, ignoreCase = true)
+        }
+    }
 
     AnimatedVisibility(
         visible = killSwitchEnabled,
@@ -624,7 +698,52 @@ fun AppKillSelectorCard(viewModel: SleepViewModel) {
                     )
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Search Bar untuk memfilter aplikasi
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = {
+                        Text("Cari aplikasi (misal: Spotify, YouTube)...", fontSize = 12.sp, color = TextSecondary)
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Cari",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(
+                                onClick = { searchQuery = "" },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Hapus Pencarian",
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = DarkSurfaceVariant,
+                        focusedContainerColor = MidnightBackground,
+                        unfocusedContainerColor = MidnightBackground,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 if (lists.isEmpty()) {
                     Box(
@@ -635,6 +754,20 @@ fun AppKillSelectorCard(viewModel: SleepViewModel) {
                     ) {
                         CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                     }
+                } else if (filteredApps.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 20.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Tidak ada aplikasi yang cocok dengan \"$searchQuery\"",
+                            fontSize = 12.sp,
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center
+                        )
+                    }
                 } else {
                     Box(
                         modifier = Modifier
@@ -644,7 +777,7 @@ fun AppKillSelectorCard(viewModel: SleepViewModel) {
                         LazyColumn(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            items(lists) { app ->
+                            items(filteredApps) { app ->
                                 val selected = selections.contains(app.packageName)
                                 Row(
                                     modifier = Modifier
@@ -951,9 +1084,14 @@ fun StatisticsTabContent(
     context: Context
 ) {
     val weeklyStats by viewModel.weeklyUsageStatsFlow.collectAsState()
-    val sessionLogs by viewModel.historySessions.collectAsState()
+    val sessionLogs by viewModel.pagedHistorySessions.collectAsState()
+    val currentPage by viewModel.currentPage.collectAsState()
+    val totalPages by viewModel.totalPages.collectAsState()
+    val totalSessionCount by viewModel.totalSessionCount.collectAsState()
+    val isLoadingPage by viewModel.isLoadingPage.collectAsState()
     val selectedSessionId by viewModel.selectedSessionIdForDetail.collectAsState()
     val activeDetails by viewModel.activeSessionDetailList.collectAsState()
+    val activePlaybacks by viewModel.activeSessionPlaybackList.collectAsState()
     val isNotificationListenerGranted by viewModel.isNotificationListenerGranted.collectAsState()
 
     LazyColumn(
@@ -1024,14 +1162,109 @@ fun StatisticsTabContent(
                     log = log,
                     isSelected = isSelected,
                     appDetails = if (isSelected) activeDetails else emptyList(),
+                    playbackDetails = if (isSelected) activePlaybacks else emptyList(),
                     onClick = {
                         if (isSelected) {
                             viewModel.clearSessionSelection()
                         } else {
                             viewModel.loadSessionUsageDetails(log.id)
                         }
-                    }
+                    },
+                    onDelete = { viewModel.deleteSession(log.id) }
                 )
+            }
+
+            // Numbered Pagination Controls (< [1] [2] [3] >)
+            if (totalPages > 1) {
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Tombol Prev (<)
+                                IconButton(
+                                    onClick = { viewModel.goToPage(currentPage - 1) },
+                                    enabled = currentPage > 1 && !isLoadingPage,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(if (currentPage > 1) DarkSurfaceVariant else Color.Transparent)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Halaman Sebelumnya",
+                                        tint = if (currentPage > 1) Color.White else TextSecondary.copy(alpha = 0.4f),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
+                                // Tombol Angka Halaman (1, 2, 3...)
+                                val startPage = (currentPage - 2).coerceAtLeast(1)
+                                val endPage = (startPage + 4).coerceAtMost(totalPages)
+                                val adjustedStart = (endPage - 4).coerceAtLeast(1)
+
+                                for (p in adjustedStart..endPage) {
+                                    val isCurrent = p == currentPage
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isCurrent) MaterialTheme.colorScheme.primary else DarkSurfaceVariant)
+                                            .clickable(enabled = !isCurrent && !isLoadingPage) {
+                                                viewModel.goToPage(p)
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "$p",
+                                            fontSize = 13.sp,
+                                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (isCurrent) MidnightBackground else Color.White
+                                        )
+                                    }
+                                }
+
+                                // Tombol Next (>)
+                                IconButton(
+                                    onClick = { viewModel.goToPage(currentPage + 1) },
+                                    enabled = currentPage < totalPages && !isLoadingPage,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(if (currentPage < totalPages) DarkSurfaceVariant else Color.Transparent)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                        contentDescription = "Halaman Berikutnya",
+                                        tint = if (currentPage < totalPages) Color.White else TextSecondary.copy(alpha = 0.4f),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text(
+                                text = "Halaman $currentPage dari $totalPages ($totalSessionCount riwayat tersimpan)",
+                                fontSize = 11.sp,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -1108,6 +1341,12 @@ fun WeeklyDeviceHealthCard(
     weeklyStats: List<AppUsageDetail>,
     isUsageGranted: Boolean
 ) {
+    // Define media-related app filter for stats as well
+    val mediaFilter = listOf("youtube", "spotify", "music", "vlc", "player", "netflix", "tiktok", "browser", "chrome")
+    val filteredStats = weeklyStats.filter { stat ->
+        mediaFilter.any { filter -> stat.packageName.lowercase().contains(filter) }
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = DarkSurface),
@@ -1120,7 +1359,7 @@ fun WeeklyDeviceHealthCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Statistik Penggunaan Mingguan",
+                    text = "Konsumsi Media Mingguan",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
@@ -1143,13 +1382,13 @@ fun WeeklyDeviceHealthCard(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "Izin akses belum diberikan.\nKesehatan statistik tidak dapat dikumpulkan.",
+                        text = "Izin akses belum diberikan.\nStatistik media tidak dapat dikumpulkan.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
                         textAlign = TextAlign.Center
                     )
                 }
-            } else if (weeklyStats.isEmpty()) {
+            } else if (filteredStats.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1157,15 +1396,15 @@ fun WeeklyDeviceHealthCard(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "Mengumpulkan data statistik perangkatan...",
+                        text = "Belum ada data aplikasi media terdeteksi.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp
                     )
                 }
             } else {
                 // Display app metrics horizontally as custom gorgeous bar logs
-                val maxUsage = weeklyStats.firstOrNull()?.usageDurationMs ?: 1L
-                weeklyStats.take(5).forEach { stat ->
+                val maxUsage = filteredStats.firstOrNull()?.usageDurationMs ?: 1L
+                filteredStats.take(5).forEach { stat ->
                     val hrs = stat.usageDurationMs / 3600000.0
                     val textLabel = if (hrs >= 1) {
                         String.format("%.1f jam", hrs)
@@ -1253,10 +1492,43 @@ fun SleepLogItemCard(
     log: SleepSession,
     isSelected: Boolean,
     appDetails: List<SleepAppUsage>,
-    onClick: () -> Unit
+    playbackDetails: List<com.example.data.SleepMediaPlayback>,
+    onClick: () -> Unit,
+    onDelete: () -> Unit
 ) {
     val formatter = remember { SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault()) }
     val dateText = formatter.format(Date(log.startTimeMs))
+    
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Hapus Riwayat?") },
+            text = { Text("Sesi riwayat ini akan dihapus permanen. Lanjutkan?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDelete()
+                        showDeleteConfirm = false
+                    }
+                ) {
+                    Text("HAPUS", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("BATAL")
+                }
+            },
+            containerColor = DarkSurface,
+            titleContentColor = Color.White,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+
+    // Define media-related app filter
+    val mediaFilter = listOf("youtube", "spotify", "music", "vlc", "player", "netflix", "tiktok", "browser", "chrome")
 
     Card(
         modifier = Modifier
@@ -1313,49 +1585,68 @@ fun SleepLogItemCard(
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Status Badge
-                    if (log.endedSuccessfully) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                "SELESAI",
-                                fontSize = 9.sp,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold
-                            )
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Status Badge
+                        if (log.endedSuccessfully) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    "SELESAI",
+                                    fontSize = 9.sp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.error.copy(alpha = 0.15f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    "BATAL",
+                                    fontSize = 9.sp,
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(MaterialTheme.colorScheme.error.copy(alpha = 0.15f))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                "BATAL",
-                                fontSize = 9.sp,
-                                color = MaterialTheme.colorScheme.error,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Icon(
+                            imageVector = if (isSelected) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Details",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    Icon(
-                        imageVector = if (isSelected) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                        contentDescription = "Details",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    
+                    // Delete Button
+                    IconButton(
+                        onClick = { showDeleteConfirm = true },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Hapus Riwayat",
+                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
 
-            // Expanding sub details (App Usage during this Sleep Timer period!)
+            // Expanding sub details
             AnimatedVisibility(
                 visible = isSelected,
                 enter = fadeIn() + expandVertically(),
@@ -1363,23 +1654,64 @@ fun SleepLogItemCard(
             ) {
                 Column(modifier = Modifier.padding(top = 12.dp)) {
                     HorizontalDivider(color = DarkSurfaceVariant)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Aplikasi Terdata Aktif Saat Timer:",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    if (appDetails.isEmpty()) {
+                    
+                    // 1. Playback List
+                    if (playbackDetails.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = "Tidak terdeteksi aplikasi multimedia yang didiamkan menyala, atau izin pelacak penggunaan belum aktif.",
-                            fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = "Lagu/Video Yang Diputar:",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
                         )
-                    } else {
-                        appDetails.forEach { item ->
+                        Spacer(modifier = Modifier.height(6.dp))
+                        playbackDetails.forEach { playback ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Text(
+                                    text = "•",
+                                    fontSize = 12.sp,
+                                    color = CozyAmber,
+                                    modifier = Modifier.padding(end = 8.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = playback.title,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                    if (playback.artist != null) {
+                                        Text(
+                                            text = playback.artist,
+                                            fontSize = 10.sp,
+                                            color = TextSecondary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. Filtered App Usage
+                    val filteredApps = appDetails.filter { app ->
+                        mediaFilter.any { filter -> app.packageName.lowercase().contains(filter) }
+                    }
+
+                    if (filteredApps.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Aplikasi Media Aktif:",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        filteredApps.forEach { item ->
                             val activeMins = item.usageDurationMs / 60000
                             Row(
                                 modifier = Modifier
@@ -1402,8 +1734,17 @@ fun SleepLogItemCard(
                         }
                     }
 
+                    if (playbackDetails.isEmpty() && filteredApps.isEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Tidak terdeteksi aktivitas media yang didiamkan menyala.",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
                     // System actions recap
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1412,7 +1753,7 @@ fun SleepLogItemCard(
                             .padding(8.dp)
                     ) {
                         Text(
-                            text = "Aksi Sistem: Wifi Off=${if (log.internetOffAttempted) "Ya" else "Tidak"}, Force Close=${log.appsKilledCount} aplikasi.",
+                            text = "Aksi Sistem: Media Paused=Ya, Force Close=${log.appsKilledCount} aplikasi.",
                             fontSize = 9.sp,
                             color = TextSecondary,
                             modifier = Modifier.fillMaxWidth()
